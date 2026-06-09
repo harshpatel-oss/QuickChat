@@ -18,47 +18,47 @@ export const AuthProvider = ({children})=>{
     // Check if user is authenticated and if so ,set the user data and connect the socket
 
 
-    const checkAuth = async()=>{
+    const checkAuth = async () => {
         try {
-            await axios.get("/api/auth/check");
-            if(data.success){
-                setAuthUser(data.user)
+            const { data } = await axios.get("/api/auth/check");
+            if (data.success) {
+                setAuthUser(data.user);
                 connectSocket(data.user);
             }
         } catch (error) {
-            toast.error(error.message)
+            toast.error(error.response?.data?.message || error.message);
         }
-    }
+    };
 
     // Login function to handle user authentication and soocket connection
 
-    const login = async(state,credentials)=>{
+    const login = async (state, credentials) => {
         try {
-            const {data} = await axios.post(`/api/auth/${state}`,credentials);
-            if(data.success){
+            const { data } = await axios.post(`/api/auth/${state}`, credentials);
+            if (data.success) {
                 setAuthUser(data.userData);
                 connectSocket(data.userData);
-                axios.defaults.headers.common["token"]= data.token;
+                axios.defaults.headers.common["token"] = data.token;
                 setToken(data.token);
-                localStorage.setItem("token",data.token)
-                toast.success(data.message)
+                localStorage.setItem("token", data.token);
+                toast.success(data.message);
             }
         } catch (error) {
-                toast.error(data.message)
+            toast.error(error.response?.data?.message || error.message);
         }
-    }
+    };
 
     // Logout function to handle user logout and socket disconnection
 
-    const logout = async()=>{
+    const logout = async () => {
         localStorage.removeItem("token");
         setToken(null);
         setAuthUser(null);
         setOnlineUser([]);
-        axios.defaults.headers.common["token"] = null ;
+        delete axios.defaults.headers.common["token"];
         toast.success("Logged out successfully");
-        socket.disconnect();
-    }
+        if (socket?.disconnect) socket.disconnect();
+    };
 
     //update profile function to handle user profile updates
     
