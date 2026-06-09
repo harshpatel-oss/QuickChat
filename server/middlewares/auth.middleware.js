@@ -1,4 +1,4 @@
-import User from "../models/user.model";
+import User from "../models/user.model.js";
 import jwt from "jsonwebtoken";
 
 // Middleware to protect routes
@@ -6,12 +6,14 @@ import jwt from "jsonwebtoken";
     try {
         const token = req.headers.token;
 
-        const decoded = jwt.verify(token,process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        const user = awaitUser.findById(decoded.userId).select("-password")
-        if(!user)return res.json({
-            success:false , message:"User not found"
-        })
+        const user = await User.findById(decoded.userId).select("-password");
+        if (!user)
+            return res.json({
+                success: false,
+                message: "User not found"
+            });
 
         req.user = user;
         next();
