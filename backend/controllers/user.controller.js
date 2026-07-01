@@ -49,10 +49,9 @@ export const getUsersForSidebar = async (req, res) => {
 
 export const updatePrivacySettings = async (req, res) => {
   try {
-    const { theme, notifications, privacy } = req.body;
+    const { theme, privacy } = req.body;
     const update = {};
     if (theme) update["settings.theme"] = theme;
-    if (notifications !== undefined) update["settings.notifications"] = notifications;
     if (privacy) update["settings.privacy"] = privacy;
     const updatedUser = await User.findByIdAndUpdate(req.user._id, update, { new: true }).select("-password -refreshTokens");
     return successResponse(res, { user: updatedUser });
