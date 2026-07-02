@@ -7,21 +7,29 @@ import { successResponse, errorResponse } from "../utils/response.js";
 
 const uploadMedia = async (media) => {
   if (!media) return { url: "", type: "" };
-  const uploadResult = await cloudinary.uploader.upload(media, { folder: "chat_media" });
+  const uploadResult = await cloudinary.uploader.upload(media, {
+    folder: "chat_media",
+  });
   return { url: uploadResult.secure_url, type: uploadResult.resource_type };
 };
 
 export const getUsersForSidebar = async (req, res) => {
   try {
     const userId = req.user._id;
-    const users = await User.find({ _id: { $ne: userId } }).select("-password -refreshTokens");
+    const users = await User.find({ _id: { $ne: userId } }).select(
+      "-password -refreshTokens",
+    );
     const unseenMessages = {};
 
     await Promise.all(
       users.map(async (user) => {
-        const count = await Message.countDocuments({ senderId: user._id, receiverId: userId, seenBy: { $ne: userId } });
+        const count = await Message.countDocuments({
+          senderId: user._id,
+          receiverId: userId,
+          seenBy: { $ne: userId },
+        });
         if (count > 0) unseenMessages[user._id] = count;
-      })
+      }),
     );
 
     return successResponse(res, { users, unseenMessages });
@@ -30,7 +38,7 @@ export const getUsersForSidebar = async (req, res) => {
   }
 };
 
- export const getMessages = async (req, res) => {
+export const getMessages = async (req, res) => {
   try {
     const { id: selectedUserId } = req.params;
     const myId = req.user._id;
@@ -65,9 +73,10 @@ export const getUsersForSidebar = async (req, res) => {
           seenBy: myId,
           deliveredTo: myId,
         },
-      }
+      },
     );
-
+    const directRoomId = `direct_${[myId.toString(), selectedUserId.toString()].sort().join("_")}`;
+    io.to(directRoomId).emit("messagesSeen", { by: myId.toString() });
     return successResponse(res, { messages });
   } catch (error) {
     return errorResponse(res, error.message, 500);
@@ -104,7 +113,7 @@ export const getGroupMessages = async (req, res) => {
     // Mark messages as seen
     await Message.updateMany(
       { groupId: groupId, seenBy: { $ne: myId } },
-      { $addToSet: { seenBy: myId, deliveredTo: myId } }
+      { $addToSet: { seenBy: myId, deliveredTo: myId } },
     );
 
     return successResponse(res, { messages });
@@ -116,7 +125,9 @@ export const getGroupMessages = async (req, res) => {
 export const markMessageAsSeen = async (req, res) => {
   try {
     const { id } = req.params;
-    await Message.findByIdAndUpdate(id, { $addToSet: { seenBy: req.user._id } });
+    await Message.findByIdAndUpdate(id, {
+      $addToSet: { seenBy: req.user._id },
+    });
     return successResponse(res, {});
   } catch (error) {
     return errorResponse(res, error.message, 500);
@@ -153,8 +164,15 @@ export const sendMessage = async (req, res) => {
         return errorResponse(res, "You are not a member of this group", 403);
       }
       // Check if only admins can message
-      if (group.onlyAdminsCanMessage && !group.admins.some((id) => id.equals(senderId))) {
-        return errorResponse(res, "Only admins can send messages in this group", 403);
+      if (
+        group.onlyAdminsCanMessage &&
+        !group.admins.some((id) => id.equals(senderId))
+      ) {
+        return errorResponse(
+          res,
+          "Only admins can send messages in this group",
+          403,
+        );
       }
 
       messagePayload.groupId = groupId;
@@ -168,6 +186,7 @@ export const sendMessage = async (req, res) => {
 
     if (groupId) {
       // Emit to group room
+      console.log("Emitting groupMessage to room:", groupId, "clients in room:", io.sockets.adapter.rooms.get(groupId)?.size);
       io.to(groupId).emit("groupMessage", newMessage);
     } else {
       // Emit to direct message room
@@ -188,10 +207,11 @@ export const editMessage = async (req, res) => {
     const message = await Message.findOneAndUpdate(
       { _id: id, senderId: req.user._id },
       { text, edited: true },
-      { new: true }
+      { new: true },
     ).populate("senderId", "fullName profilePic");
 
-    if (!message) return errorResponse(res, "Message not found or unauthorized", 404);
+    if (!message)
+      return errorResponse(res, "Message not found or unauthorized", 404);
 
     if (message.groupId) {
       io.to(message.groupId.toString()).emit("messageUpdated", message);
@@ -214,29 +234,32 @@ export const deleteMessage = async (req, res) => {
 
     const message = await Message.findById(id);
     if (!message) return errorResponse(res, "Message not found", 404);
-    if (!message.senderId.equals(req.user._id)) return errorResponse(res, "Unauthorized", 403);
+    if (!message.senderId.equals(req.user._id))
+      return errorResponse(res, "Unauthorized", 403);
 
     if (forEveryone) {
-      // Mark as deleted for everyone
       message.deletedForEveryone = true;
       await message.save();
 
       if (message.groupId) {
-        io.to(message.groupId.toString()).emit("messageDeleted", { messageId: id });
+        io.to(message.groupId.toString()).emit("messageDeleted", {
+          messageId: id,
+        });
       } else {
-        const receiverSockets = userSocketMap[message.receiverId];
-        if (receiverSockets) {
-          receiverSockets.forEach((socketId) => {
-            io.to(socketId).emit("messageDeleted", { messageId: id });
-          });
-        }
+        const directRoomId = `direct_${[
+          req.user._id.toString(),
+          message.receiverId.toString(),
+        ]
+          .sort()
+          .join("_")}`;
+        io.to(directRoomId).emit("messageDeleted", { messageId: id });
       }
       return successResponse(res, { message: "Deleted for everyone" });
-    } else {
-      // Soft delete - just for this user (in future can use deletedBy array)
-      await Message.deleteOne({ _id: id });
-      return successResponse(res, { message: "Deleted" });
     }
+    else {
+  await Message.deleteOne({ _id: id });
+  return successResponse(res, { message: "Deleted" });
+}
   } catch (error) {
     return errorResponse(res, error.message, 500);
   }
@@ -251,7 +274,13 @@ export const reactToMessage = async (req, res) => {
 
     const existing = message.reactions.find((item) => item.userId.equals(req.user._id));
     if (existing) {
-      existing.reaction = reaction;
+      if (existing.reaction === reaction) {
+        message.reactions = message.reactions.filter(
+          (item) => !item.userId.equals(req.user._id)
+        );
+      } else {
+        existing.reaction = reaction;
+      }
     } else {
       message.reactions.push({ userId: req.user._id, reaction });
     }
@@ -263,8 +292,10 @@ export const reactToMessage = async (req, res) => {
         reactions: message.reactions,
       });
     } else {
-      // For direct messages, use room ID
-      const directRoomId = `direct_${[req.user._id.toString(), message.receiverId.toString()].sort().join("_")}`;
+      const otherUserId = message.senderId.toString() === req.user._id.toString()
+        ? message.receiverId.toString()
+        : message.senderId.toString();
+      const directRoomId = `direct_${[req.user._id.toString(), otherUserId].sort().join("_")}`;
       io.to(directRoomId).emit("messageReaction", {
         messageId: id,
         reactions: message.reactions,
@@ -380,4 +411,3 @@ export const getSharedMedia = async (req, res) => {
     return errorResponse(res, error.message, 500);
   }
 };
-

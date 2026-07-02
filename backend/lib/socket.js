@@ -1,5 +1,6 @@
 import { Server } from "socket.io";
 import User from "../models/user.model.js";
+import Group from "../models/group.model.js";   // add this import
 
 export const userSocketMap = {}; // { userId: Set(socketId) }
 export const socketUserMap = {}; // { socketId: userId }
@@ -33,6 +34,8 @@ export const attachSocketServer = (server) => {
         await User.findByIdAndUpdate(userId, {
           isOnline: true,
         });
+        const groups = await Group.find({ members: userId }).select("_id");
+      groups.forEach((g) => socket.join(g._id.toString()));
       } catch (err) {
         console.error("Failed to update online status:", err);
       }
