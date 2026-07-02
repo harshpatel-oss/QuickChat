@@ -33,7 +33,7 @@ export function ChatProvider({ children }) {
   const [activeChatUser, setActiveChatUser] = useState(null);
   const [messages, setMessages] = useState([]);
   const [typingFrom, setTypingFrom] = useState({});
-
+ const [isLoadingSidebar, setIsLoadingSidebar] = useState(false);
   const activeChatRef = useRef(null);
   const openRequestIdRef = useRef(0);
 
@@ -47,18 +47,24 @@ export function ChatProvider({ children }) {
 
     const socket = connectSocket(user._id);
 
-    return () => {
-      socket?.disconnect();
-    };
+    // return () => {
+    //   socket?.disconnect();
+    // };
   }, [user?._id]);
 
   /* ---------------- SIDEBAR ---------------- */
-  const loadSidebar = useCallback(async () => {
+  
+
+const loadSidebar = useCallback(async () => {
+  setIsLoadingSidebar(true);
+  try {
     const data = await userService.getSidebar();
     setSidebarUsers(data.users ?? []);
     setUnseenMessages(data.unseenMessages ?? {});
-  }, []);
-
+  } finally {
+    setIsLoadingSidebar(false);
+  }
+}, []);
   /* ---------------- OPEN CHAT ---------------- */
   const openChat = useCallback(
     async (selectedUser) => {
@@ -185,22 +191,20 @@ export function ChatProvider({ children }) {
     setMessages((prev) => prev.filter((m) => m._id !== messageId));
   }, []);
 
-  const applyReaction = useCallback(({ messageId, reaction, from }) => {
-    setMessages((prev) =>
-      prev.map((m) => {
-        if (m._id !== messageId) return m;
-        const existing = Array.isArray(m.reactions) ? m.reactions : [];
-        const withoutUser = existing.filter((r) => r.userId !== from);
-        return {
-          ...m,
-          reactions: reaction
-            ? [...withoutUser, { userId: from, reaction }]
-            : withoutUser,
-        };
-      })
-    );
-  }, []);
-
+  const applyReaction = useCallback(({ messageId, reactions }) => {
+  setMessages((prev) =>
+    prev.map((m) => (m._id === messageId ? { ...m, reactions } : m))
+  );
+}, []);
+   const applyMessageRead = useCallback(({ messageId, from }) => {
+  setMessages((prev) =>
+    prev.map((m) =>
+      m._id === messageId
+        ? { ...m, seenBy: m.seenBy?.includes(from) ? m.seenBy : [...(m.seenBy ?? []), from] }
+        : m
+    )
+  );
+}, []);
   /* ---------------- SOCKET LISTENERS ---------------- */
   // The socket may not exist yet the first time this effect runs (e.g. the
   // SOCKET INIT effect above is still waiting on user._id to resolve). If we
@@ -223,8 +227,9 @@ export function ChatProvider({ children }) {
       const handleMessageReaction = (payload) => applyReaction(payload);
       const handleMessagePinned = (msg) => applyUpdate(msg);
       const handleMessageUnpinned = (msg) => applyUpdate(msg);
-
+      const handleMessageRead = (payload) => applyMessageRead(payload);
       s.on("onlineUsers", handleOnline);
+      s.on("messageRead", handleMessageRead);
       s.on("typing", handleTyping);
       s.on("newMessage", handleNewMessage);
       // Server emits "messageUpdated" for edits (see lib/socket.js) —
@@ -242,6 +247,7 @@ export function ChatProvider({ children }) {
         s.off("typing", handleTyping);
         s.off("newMessage", handleNewMessage);
         s.off("messageUpdated", handleMessageUpdated);
+        s.off("messageRead", handleMessageRead);
         s.off("messageDeleted", handleMessageDeleted);
         s.off("messageReaction", handleMessageReaction);
         s.off("messagePinned", handleMessagePinned);

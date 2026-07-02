@@ -128,22 +128,13 @@ export default function GroupsPage() {
     }
   };
    const handleUnpin = async (message) => {
-    try {
-      const data = await messageService.unpin(message._id);
-  
-      emitMessageUnpinned({
-        message: data.message,
-        groupId: null,
-        receiverId: activeChatUser._id,
-      });
-  
-      applyMessageUpdate(data.message);
-  
-      toast.success("Message unpinned");
-    } catch (error) {
-      toast.error(error.message || "Failed to unpin message");
-    }
-  }; 
+  try {
+    await messageService.unpin(message._id);
+    toast.success("Message unpinned");
+  } catch (error) {
+    toast.error(error.message || "Failed to unpin message");
+  }
+};
   const handleTyping = (isTyping) => {
     // Emit typing event to group
     if (activeGroup) {

@@ -27,7 +27,19 @@ export function GroupProvider({ children }) {
   const [hasMoreGroupMessages, setHasMoreGroupMessages] = useState(true);
   const [groupMessagesPage, setGroupMessagesPage] = useState(1);
   const [groupTypingUsers, setGroupTypingUsers] = useState({});
-
+  const [unseenGroupMessages, setUnseenGroupMessages] = useState({});
+ 
+  // const receiveGroupMessage = useCallback((message) => {
+  //   const current = activeGroupRef.current;
+  //   if (current && message.groupId === current._id) {
+  //     setGroupMessages((prev) => [...prev, message]);
+  //     return;
+  //   }
+  //   setUnseenGroupMessages((prev) => ({
+  //     ...prev,
+  //     [message.groupId]: (prev[message.groupId] ?? 0) + 1,
+  //   }));
+  // }, []);
   const activeGroupRef = useRef(null);
   useEffect(() => {
     activeGroupRef.current = activeGroup;
@@ -55,6 +67,11 @@ export function GroupProvider({ children }) {
     setHasMoreGroupMessages(true);
     setGroupMessagesPage(1);
     setActiveGroup(null);
+
+    // Join first, so nothing that lands mid-fetch (or fires because the
+    // socket only just connected) gets missed.
+    //emitJoinRoom(groupId, "group");
+
     try {
       const [groupData, messagesData] = await Promise.all([
         groupService.getById(groupId),
@@ -63,9 +80,6 @@ export function GroupProvider({ children }) {
       setActiveGroup(groupData.group);
       setGroupMessages(messagesData.messages ?? []);
       setHasMoreGroupMessages((messagesData.messages ?? []).length === 40);
-      
-      // Join the socket room for this group
-      emitJoinRoom(groupId, "group");
     } finally {
       setIsLoadingGroupMessages(false);
     }
@@ -76,7 +90,11 @@ export function GroupProvider({ children }) {
     if (!current) return;
     const nextPage = groupMessagesPage + 1;
     try {
-      const data = await messageService.getGroupMessages(current._id, nextPage, 40);
+      const data = await messageService.getGroupMessages(
+        current._id,
+        nextPage,
+        40,
+      );
       const older = data.messages ?? [];
       setGroupMessages((prev) => [...older, ...prev]);
       setGroupMessagesPage(nextPage);
@@ -111,15 +129,10 @@ export function GroupProvider({ children }) {
     return data.newMessage;
   }, []);
 
-  const receiveGroupMessage = useCallback((message) => {
-    const current = activeGroupRef.current;
-    if (current && message.groupId === current._id) {
-      setGroupMessages((prev) => [...prev, message]);
-    }
-  }, []);
-
   const applyMessageUpdate = useCallback((updated) => {
-    setGroupMessages((prev) => prev.map((m) => (m._id === updated._id ? updated : m)));
+    setGroupMessages((prev) =>
+      prev.map((m) => (m._id === updated._id ? updated : m)),
+    );
   }, []);
 
   const applyMessageDelete = useCallback(({ messageId }) => {
@@ -127,23 +140,43 @@ export function GroupProvider({ children }) {
   }, []);
 
   const applyMessageReaction = useCallback(({ messageId, reactions }) => {
-    setGroupMessages((prev) => prev.map((m) => (m._id === messageId ? { ...m, reactions } : m)));
+    setGroupMessages((prev) =>
+      prev.map((m) => (m._id === messageId ? { ...m, reactions } : m)),
+    );
   }, []);
 
   const applyMessagePinned = useCallback((message) => {
-    setGroupMessages((prev) => prev.map((m) => (m._id === message._id ? message : m)));
+    setGroupMessages((prev) =>
+      prev.map((m) => (m._id === message._id ? message : m)),
+    );
   }, []);
 
   const applyMessageUnpinned = useCallback((message) => {
-    setGroupMessages((prev) => prev.map((m) => (m._id === message._id ? message : m)));
+    setGroupMessages((prev) =>
+      prev.map((m) => (m._id === message._id ? message : m)),
+    );
   }, []);
-
+    const receiveGroupMessage = useCallback((message) => {
+  const current = activeGroupRef.current;
+  console.log("receiveGroupMessage check:", {
+    currentGroupId: current?._id,
+    currentGroupIdType: typeof current?._id,
+    messageGroupId: message.groupId,
+    messageGroupIdType: typeof message.groupId,
+    isEqual: current?._id === message.groupId,
+  });
+  if (current && message.groupId === current._id) {
+    setGroupMessages((prev) => [...prev, message]);
+  }
+}, []);
   const applyGroupUpdate = useCallback((updatedGroup) => {
     const current = activeGroupRef.current;
     if (current && updatedGroup._id === current._id) {
       setActiveGroup(updatedGroup);
     }
-    setGroups((prev) => prev.map((g) => (g._id === updatedGroup._id ? updatedGroup : g)));
+    setGroups((prev) =>
+      prev.map((g) => (g._id === updatedGroup._id ? updatedGroup : g)),
+    );
   }, []);
 
   const updateGroup = useCallback(async (id, payload) => {
@@ -210,7 +243,10 @@ export function GroupProvider({ children }) {
     let retryTimer = null;
 
     const attach = (s) => {
-      const onGroupMessage = (msg) => receiveGroupMessage(msg);
+      const onGroupMessage = (msg) => {
+         console.log("received groupMessage", msg);
+        receiveGroupMessage(msg);
+      }
       const onGroupTyping = ({ groupId, userId, isTyping }) =>
         setGroupTyping(groupId, userId, isTyping);
       const onMessageUpdated = (msg) => applyMessageUpdate(msg);
@@ -326,10 +362,12 @@ export function GroupProvider({ children }) {
       leaveGroup,
       joinPublicGroup,
       deleteGroup,
-    ]
+    ],
   );
 
-  return <GroupContext.Provider value={value}>{children}</GroupContext.Provider>;
+  return (
+    <GroupContext.Provider value={value}>{children}</GroupContext.Provider>
+  );
 }
 
 export function useGroup() {
